@@ -29,14 +29,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func buildNodeExecuteContext() context.Context {
+	return dag.NewContext(context.Background(), dag.Context{
+		DaguExecutionLogPath: "/tmp",
+		DaguSchedulerLogPath: "/tmp",
+		DaguRequestID:        "/test",
+	})
+}
+
 func TestExecute(t *testing.T) {
 	n := &Node{data: NodeData{
 		Step: dag.Step{
 			Command:         "true",
 			OutputVariables: &dag.SyncMap{},
 		}}}
-	require.NoError(t, n.Execute(context.Background()))
+	err := n.Execute(context.Background())
+	require.NotNil(t, err)
 	require.Nil(t, n.data.Error)
+	require.Equal(t, err.Error(), "failed to assert DAG context")
 }
 
 func TestError(t *testing.T) {
@@ -45,7 +55,7 @@ func TestError(t *testing.T) {
 			Command:         "false",
 			OutputVariables: &dag.SyncMap{},
 		}}}
-	err := n.Execute(context.Background())
+	err := n.Execute(buildNodeExecuteContext())
 	require.True(t, err != nil)
 	require.Equal(t, n.data.Error, err)
 }
@@ -64,7 +74,7 @@ func TestSignal(t *testing.T) {
 	}()
 
 	n.setStatus(NodeStatusRunning)
-	err := n.Execute(context.Background())
+	err := n.Execute(buildNodeExecuteContext())
 
 	require.Error(t, err)
 	require.Equal(t, n.State().Status, NodeStatusCancel)
@@ -85,7 +95,7 @@ func TestSignalSpecified(t *testing.T) {
 	}()
 
 	n.setStatus(NodeStatusRunning)
-	err := n.Execute(context.Background())
+	err := n.Execute(buildNodeExecuteContext())
 
 	require.Error(t, err)
 	require.Equal(t, n.State().Status, NodeStatusCancel)
@@ -346,7 +356,7 @@ func TestRunScript(t *testing.T) {
 	require.Equal(t, n.data.Step.Script, string(b))
 
 	require.NoError(t, err)
-	err = n.Execute(context.Background())
+	err = n.Execute(buildNodeExecuteContext())
 	require.NoError(t, err)
 	err = n.teardown()
 	require.NoError(t, err)
@@ -383,7 +393,7 @@ func runTestNode(t *testing.T, n *Node) {
 	err := n.setup(os.Getenv("HOME"),
 		fmt.Sprintf("test-request-id-%d", rand.Int()))
 	require.NoError(t, err)
-	err = n.Execute(context.Background())
+	err = n.Execute(buildNodeExecuteContext())
 	require.NoError(t, err)
 	err = n.teardown()
 	require.NoError(t, err)

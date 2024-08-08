@@ -48,6 +48,14 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func buildSchedulerScheduleContext() context.Context {
+	return dag.NewContext(context.Background(), dag.Context{
+		DaguExecutionLogPath: "/tmp",
+		DaguSchedulerLogPath: "/tmp",
+		DaguRequestID:        "/test",
+	})
+}
+
 func TestScheduler(t *testing.T) {
 	g, err := NewExecutionGraph(
 		logger.Default,
@@ -69,7 +77,7 @@ func TestScheduler(t *testing.T) {
 		}
 	}()
 
-	err = sc.Schedule(context.Background(), g, done)
+	err = sc.Schedule(buildSchedulerScheduleContext(), g, done)
 	require.Error(t, err)
 
 	require.Equal(t, counter.Load(), int64(3))
@@ -87,7 +95,7 @@ func TestSchedulerParallel(t *testing.T) {
 		step("2", testCommand),
 		step("3", testCommand),
 	)
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.NoError(t, err)
 	require.Equal(t, sc.Status(g), StatusSuccess)
 
@@ -177,7 +185,7 @@ func TestSchedulerCancel(t *testing.T) {
 		sc.Cancel(g)
 	}()
 
-	_ = sc.Schedule(context.Background(), g, nil)
+	_ = sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 
 	require.Eventually(t, func() bool {
 		return sc.Status(g) == StatusCancel
@@ -283,7 +291,7 @@ func TestSchedulerRetrySuccess(t *testing.T) {
 		require.Greater(t, retriedAt.Sub(startedAt), time.Millisecond*500)
 	}()
 
-	err = sc.Schedule(context.Background(), g, nil)
+	err = sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, sc.Status(g), StatusSuccess)
@@ -345,7 +353,7 @@ func TestSchedulerOnExit(t *testing.T) {
 		step("3", testCommand),
 	)
 
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.NoError(t, err)
 
 	nodes := g.Nodes()
@@ -367,7 +375,7 @@ func TestSchedulerOnExitOnFail(t *testing.T) {
 		step("3", testCommand),
 	)
 
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.Error(t, err)
 
 	nodes := g.Nodes()
@@ -394,7 +402,7 @@ func TestSchedulerOnSignal(t *testing.T) {
 		sc.Signal(g, syscall.SIGTERM, nil, false)
 	}()
 
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.NoError(t, err)
 
 	nodes := g.Nodes()
@@ -426,7 +434,7 @@ func TestSchedulerOnCancel(t *testing.T) {
 		sc.Signal(g, syscall.SIGTERM, done, false)
 	}()
 
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.NoError(t, err)
 	<-done // Wait for canceling finished
 	require.Equal(t, sc.Status(g), StatusCancel)
@@ -453,7 +461,7 @@ func TestSchedulerOnSuccess(t *testing.T) {
 		step("1", testCommand),
 	)
 
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.NoError(t, err)
 
 	nodes := g.Nodes()
@@ -479,7 +487,7 @@ func TestSchedulerOnFailure(t *testing.T) {
 		step("1", testCommandFail),
 	)
 
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.Error(t, err)
 
 	nodes := g.Nodes()
@@ -512,7 +520,7 @@ func TestRepeat(t *testing.T) {
 		sc.Cancel(g)
 	}()
 
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.NoError(t, err)
 
 	nodes := g.Nodes()
@@ -535,7 +543,7 @@ func TestRepeatFail(t *testing.T) {
 		},
 	)
 	sc := New(&Config{LogDir: testHomeDir})
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.Error(t, err)
 
 	nodes := g.Nodes()
@@ -567,7 +575,7 @@ func TestStopRepetitiveTaskGracefully(t *testing.T) {
 		sc.Signal(g, syscall.SIGTERM, done, false)
 	}()
 
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.NoError(t, err)
 	<-done
 
@@ -658,7 +666,7 @@ func TestTakeOutputFromPrevStep(t *testing.T) {
 	s2.Output = "TOOK_PREV_OUT"
 
 	g, sc := newTestScheduler(t, &Config{LogDir: testHomeDir}, s1, s2)
-	err := sc.Schedule(context.Background(), g, nil)
+	err := sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 	require.NoError(t, err)
 
 	nodes := g.Nodes()
@@ -687,7 +695,7 @@ func testSchedule(t *testing.T, steps ...dag.Step) (
 			MaxActiveRuns: 2,
 			LogDir:        testHomeDir,
 		}, steps...)
-	return g, sc, sc.Schedule(context.Background(), g, nil)
+	return g, sc, sc.Schedule(buildSchedulerScheduleContext(), g, nil)
 }
 
 func newTestScheduler(t *testing.T, cfg *Config, steps ...dag.Step) (
