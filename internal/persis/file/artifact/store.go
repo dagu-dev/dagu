@@ -107,6 +107,9 @@ func (s *Store) collectDay(
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
+		if len(page.Items) == query.Limit {
+			return true, nil
+		}
 
 		from := ""
 		if resume != nil && day == resume.Day {
@@ -132,30 +135,38 @@ func (s *Store) collectDay(
 			continue
 		}
 
-		files, err := listFiles(rec.Dir)
-		if err != nil {
-			logger.Warn(ctx, "Failed to list artifact files", tag.Error(err), tag.Dir(rec.Dir))
-			continue
-		}
 		startedAt, _ := stringutil.ParseTime(rec.StartedAt)
 
-		for _, file := range files {
-			if from != "" && file.path <= from {
-				continue
+		// Paging deep into one run re-walks it from the start, because a cursor
+		// names a path rather than an offset the filesystem can resume from.
+		// Bounded by the run's own size, and only reached by a caller paging
+		// through a single very large run.
+		full := false
+		err := walkFiles(rec.Dir, func(relPath string, size int64) bool {
+			// The cursor names the last file returned, so resume strictly after it.
+			if from != "" && !walkOrderAfter(relPath, from) {
+				return true
 			}
-			// The cursor names the last file returned, so the next page can
-			// resume strictly after it.
 			if len(page.Items) == query.Limit {
-				return true, nil
+				full = true
+				return false
 			}
 			page.Items = append(page.Items, persis.ArtifactFile{
 				Name:      rec.Name,
 				DAGRunID:  rec.DAGRunID,
 				StartedAt: startedAt,
-				Path:      file.path,
-				Size:      file.size,
+				Path:      relPath,
+				Size:      size,
 			})
-			page.NextCursor = encodeCursor(query, day, runDir.name, file.path)
+			page.NextCursor = encodeCursor(query, day, runDir.name, relPath)
+			return true
+		})
+		if err != nil {
+			logger.Warn(ctx, "Failed to list artifact files", tag.Error(err), tag.Dir(rec.Dir))
+			continue
+		}
+		if full {
+			return true, nil
 		}
 	}
 	return false, nil
@@ -301,15 +312,14 @@ func listNumericDirsDesc(dir string, width int) ([]string, error) {
 	return names, nil
 }
 
-type artifactFileEntry struct {
-	path string
-	size int64
-}
-
-// listFiles walks a run's artifact directory, returning regular files in a
-// stable order.
-func listFiles(dir string) ([]artifactFileEntry, error) {
-	var files []artifactFileEntry
+// walkFiles visits a run's regular files in walk order, stopping when visit
+// returns false.
+//
+// Walk order is lexical within each directory, so the sequence is the same on
+// every call without materialising the whole tree first. That is what makes
+// stopping early safe: a page reads only as far as it needs, and the next page
+// resumes into the same order.
+func walkFiles(dir string, visit func(relPath string, size int64) bool) error {
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -325,18 +335,32 @@ func listFiles(dir string) ([]artifactFileEntry, error) {
 		if err != nil {
 			return err
 		}
-		files = append(files, artifactFileEntry{path: filepath.ToSlash(rel), size: info.Size()})
+		if !visit(filepath.ToSlash(rel), info.Size()) {
+			return fs.SkipAll
+		}
 		return nil
 	})
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
+	if err != nil && os.IsNotExist(err) {
+		return nil
 	}
+	return err
+}
 
-	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
-	return files, nil
+// walkOrderAfter reports whether path comes strictly after other in walk order.
+//
+// Walk order is not the order of the joined paths: a directory is descended
+// where its own name sorts, so everything under "a/" precedes "a.txt" even
+// though "a.txt" < "a/b.txt" as strings. Comparing component by component
+// reproduces that, which lets a cursor resume by comparison rather than by
+// searching the tree for the file it names.
+func walkOrderAfter(path, other string) bool {
+	left, right := strings.Split(path, "/"), strings.Split(other, "/")
+	for i := 0; i < len(left) && i < len(right); i++ {
+		if left[i] != right[i] {
+			return left[i] > right[i]
+		}
+	}
+	return len(left) > len(right)
 }
 
 func inRange(rec *Record, query persis.ArtifactQuery) bool {

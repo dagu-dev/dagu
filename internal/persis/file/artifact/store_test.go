@@ -253,6 +253,31 @@ func TestQueryArtifactsPagination(t *testing.T) {
 		}
 	})
 
+	// Paths where a nested file and a sibling file share a prefix are where
+	// resuming by a plain string comparison would skip or repeat an entry.
+	t.Run("WalksNestedAndSiblingPathsExactlyOnce", func(t *testing.T) {
+		f := newStoreFixture(t)
+		f.index(t, "alpha", "run-1", day2, nil, "a.txt", "a/b.txt", "a/y/z.txt", "a-b.txt")
+
+		for _, limit := range []int{1, 2, 3, 5} {
+			var seen []string
+			query := persis.ArtifactQuery{Limit: limit}
+			for {
+				page := f.query(t, query)
+				for _, item := range page.Items {
+					seen = append(seen, item.Path)
+				}
+				if page.NextCursor == "" {
+					break
+				}
+				query.Cursor = page.NextCursor
+			}
+			assert.ElementsMatch(t,
+				[]string{"a.txt", "a/b.txt", "a/y/z.txt", "a-b.txt"}, seen, "limit %d", limit)
+			assert.Len(t, seen, 4, "limit %d", limit)
+		}
+	})
+
 	t.Run("RejectsCursorFromDifferentFilters", func(t *testing.T) {
 		f := newStoreFixture(t)
 		f.index(t, "alpha", "run-1", day2, nil, "a1.txt", "a2.txt")
