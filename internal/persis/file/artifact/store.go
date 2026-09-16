@@ -227,18 +227,25 @@ func (s *Store) listDaysDesc(query persis.ArtifactQuery) ([]string, error) {
 
 	var days []string
 	for _, year := range years {
+		if outsideBounds(year, from, to) {
+			continue
+		}
 		months, err := listNumericDirsDesc(filepath.Join(s.rootDir, year), 2)
 		if err != nil {
 			return nil, err
 		}
 		for _, month := range months {
+			monthKey := year + "/" + month
+			if outsideBounds(monthKey, from, to) {
+				continue
+			}
 			daysOfMonth, err := listNumericDirsDesc(filepath.Join(s.rootDir, year, month), 2)
 			if err != nil {
 				return nil, err
 			}
 			for _, day := range daysOfMonth {
-				key := year + "/" + month + "/" + day
-				if (from != "" && key < from) || (to != "" && key > to) {
+				key := monthKey + "/" + day
+				if outsideBounds(key, from, to) {
 					continue
 				}
 				days = append(days, key)
@@ -246,6 +253,21 @@ func (s *Store) listDaysDesc(query persis.ArtifactQuery) ([]string, error) {
 		}
 	}
 	return days, nil
+}
+
+// outsideBounds reports whether a "YYYY", "YYYY/MM" or "YYYY/MM/DD" key falls
+// outside the day bounds. Comparing a bound truncated to the key's own width is
+// what lets a whole year or month be skipped without reading its directory,
+// which is the difference between a day's query costing one read and costing
+// one per month of retained history.
+func outsideBounds(key, from, to string) bool {
+	if from != "" && key < from[:len(key)] {
+		return true
+	}
+	if to != "" && key > to[:len(key)] {
+		return true
+	}
+	return false
 }
 
 func dayBounds(query persis.ArtifactQuery) (from, to string) {

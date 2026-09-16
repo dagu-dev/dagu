@@ -121,6 +121,23 @@ func TestQueryArtifacts(t *testing.T) {
 		assert.Equal(t, []string{"run-1"}, runIDs(page))
 	})
 
+	// Pruning compares a truncated bound against a year or month prefix, so a
+	// range spanning both is where an off-by-one would show up.
+	t.Run("BoundsAcrossMonthsAndYears", func(t *testing.T) {
+		f := newStoreFixture(t)
+		f.index(t, "alpha", "run-2025", time.Date(2025, 12, 31, 12, 0, 0, 0, time.UTC), nil, "a.txt")
+		f.index(t, "alpha", "run-jan", time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC), nil, "b.txt")
+		f.index(t, "alpha", "run-sep", day2, nil, "c.txt")
+		f.index(t, "alpha", "run-2027", time.Date(2027, 1, 1, 12, 0, 0, 0, time.UTC), nil, "d.txt")
+
+		page := f.query(t, persis.ArtifactQuery{
+			From: persis.NewUTC(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			To:   persis.NewUTC(time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC)),
+		})
+
+		assert.Equal(t, []string{"run-sep", "run-jan"}, runIDs(page))
+	})
+
 	t.Run("BoundsByDateRange", func(t *testing.T) {
 		f := newStoreFixture(t)
 		f.index(t, "alpha", "run-old", day1, nil, "a.txt")
