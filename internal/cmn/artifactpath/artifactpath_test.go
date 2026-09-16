@@ -6,6 +6,7 @@ package artifactpath_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,12 @@ import (
 )
 
 var testTime = time.Date(2026, 9, 15, 14, 32, 7, 0, time.UTC)
+
+// hexSuffix builds a syntactically valid suffix of whatever width the layout
+// currently uses, so widening it does not mean rewriting these tables.
+func hexSuffix(fill byte) string {
+	return strings.Repeat(string(fill), artifactpath.SuffixLen)
+}
 
 func TestNewRunDir(t *testing.T) {
 	t.Parallel()
@@ -35,7 +42,7 @@ func TestNewRunDir(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "143207", parsed.TimeOfDay)
 		assert.Equal(t, "daily-report", parsed.DAGName)
-		assert.Len(t, parsed.Suffix, 6)
+		assert.Len(t, parsed.Suffix, artifactpath.SuffixLen)
 	})
 
 	t.Run("LocalTimeUsesUTCDay", func(t *testing.T) {
@@ -87,6 +94,20 @@ func TestNewRunDir(t *testing.T) {
 		first, err := artifactpath.NewRunDir(context.Background(), base, "", "same", "run-1", testTime)
 		require.NoError(t, err)
 		second, err := artifactpath.NewRunDir(context.Background(), base, "", "same", "run-2", testTime)
+		require.NoError(t, err)
+
+		assert.NotEqual(t, first, second)
+	})
+
+	// These two run IDs share a 6-character SHA-256 prefix. At that width one
+	// would have written into the other's directory.
+	t.Run("SeparatesRunIDsSharingAShortHashPrefix", func(t *testing.T) {
+		t.Parallel()
+		base := t.TempDir()
+
+		first, err := artifactpath.NewRunDir(context.Background(), base, "", "same", "run-2162", testTime)
+		require.NoError(t, err)
+		second, err := artifactpath.NewRunDir(context.Background(), base, "", "same", "run-2198", testTime)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, first, second)
@@ -179,7 +200,7 @@ func TestMetaPath(t *testing.T) {
 	t.Run("RejectsShallowPath", func(t *testing.T) {
 		t.Parallel()
 
-		_, ok := artifactpath.MetaPath("/artifacts", filepath.Join("/", "143207_dag_a7f3c2"))
+		_, ok := artifactpath.MetaPath("/artifacts", filepath.Join("/", "143207_dag_"+hexSuffix('a')))
 		assert.False(t, ok)
 	})
 }
@@ -188,10 +209,10 @@ func TestSplitRunDir(t *testing.T) {
 	t.Parallel()
 
 	day, name, ok := artifactpath.SplitRunDir(
-		filepath.Join("/artifacts", "2026", "09", "15", "143207_report_a7f3c2"))
+		filepath.Join("/artifacts", "2026", "09", "15", "143207_report_"+hexSuffix('a')))
 	require.True(t, ok)
 	assert.Equal(t, "2026/09/15", day)
-	assert.Equal(t, "143207_report_a7f3c2", name)
+	assert.Equal(t, "143207_report_"+hexSuffix('a'), name)
 }
 
 func TestParseRunDirName(t *testing.T) {
@@ -201,12 +222,12 @@ func TestParseRunDirName(t *testing.T) {
 		t.Parallel()
 
 		tests := []struct{ name, dagName string }{
-			{"143207_daily-report_a7f3c2", "daily-report"},
-			{"000000_report_000000", "report"},
-			{"235959_my.dag_ffffff", "my.dag"},
-			{"143207_with_underscores_abcdef", "with_underscores"},
-			{"143207_con_a7f3c2", "con"},
-			{"143207_trailing._0a1b2c", "trailing."},
+			{"143207_daily-report_" + hexSuffix('a'), "daily-report"},
+			{"000000_report_" + hexSuffix('0'), "report"},
+			{"235959_my.dag_" + hexSuffix('f'), "my.dag"},
+			{"143207_with_underscores_" + hexSuffix('b'), "with_underscores"},
+			{"143207_con_" + hexSuffix('c'), "con"},
+			{"143207_trailing._" + hexSuffix('d'), "trailing."},
 		}
 		for _, tt := range tests {
 			parsed, ok := artifactpath.ParseRunDirName(tt.name)
@@ -221,12 +242,12 @@ func TestParseRunDirName(t *testing.T) {
 		for _, name := range []string{
 			"",
 			"143207",
-			"14320_report_a7f3c2",          // short time
-			"1432o7_report_a7f3c2",         // non-digit time
-			"143207_report_a7f3k2",         // non-hex suffix
-			"143207__a7f3c2",               // empty DAG name
-			"143207_report-a7f3c2",         // missing suffix separator
-			"dag-run_20260915_143207Z_run", // legacy layout
+			"14320_report_" + hexSuffix('a'),  // short time
+			"1432o7_report_" + hexSuffix('a'), // non-digit time
+			"143207_report_" + strings.Repeat("k", artifactpath.SuffixLen), // non-hex suffix
+			"143207__" + hexSuffix('a'),                                    // empty DAG name
+			"143207_report-" + hexSuffix('a'),                              // missing suffix separator
+			"dag-run_20260915_143207Z_run",                                 // legacy layout
 		} {
 			_, ok := artifactpath.ParseRunDirName(name)
 			assert.False(t, ok, name)
@@ -250,8 +271,8 @@ func TestParseRunDirName(t *testing.T) {
 func TestMetaNameHelpers(t *testing.T) {
 	t.Parallel()
 
-	assert.True(t, artifactpath.IsMetaName("143207_report_a7f3c2"+artifactpath.MetaSuffix))
+	assert.True(t, artifactpath.IsMetaName("143207_report_"+hexSuffix('a')+artifactpath.MetaSuffix))
 	assert.False(t, artifactpath.IsMetaName("143207_report_a7f3c2"))
-	assert.Equal(t, "143207_report_a7f3c2",
-		artifactpath.TrimMetaSuffix("143207_report_a7f3c2"+artifactpath.MetaSuffix))
+	assert.Equal(t, "143207_report_"+hexSuffix('a'),
+		artifactpath.TrimMetaSuffix("143207_report_"+hexSuffix('a')+artifactpath.MetaSuffix))
 }

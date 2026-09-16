@@ -27,13 +27,18 @@ import (
 // MetaSuffix is appended to a run directory name to address its sidecar.
 const MetaSuffix = ".meta"
 
+// SuffixLen is the length of the hex suffix in a run directory name.
+//
+// It separates two runs of the same DAG started within the same second. At six
+// characters a thousand-way parallel fan-out of one DAG collided roughly three
+// times in a hundred, and a collision means one run writing into another run's
+// directory, so the width is set well past where that matters rather than just
+// past where it was observed.
+const SuffixLen = 16
+
 const (
 	dayLayout       = "2006/01/02"
 	timeOfDayLayout = "150405"
-
-	// suffixLen is the length of the hex suffix that disambiguates two runs of
-	// the same DAG started within the same second.
-	suffixLen = 6
 
 	// maxDAGNameLen bounds the DAG name segment. It matches ir.DAGNameMaxLen,
 	// duplicated here to keep this package free of domain imports.
@@ -142,7 +147,7 @@ func TrimMetaSuffix(name string) string {
 // DAG name it reports is the sanitized path segment, which is a filter hint
 // only; the sidecar holds the authoritative name.
 func ParseRunDirName(name string) (RunDirName, bool) {
-	const minLen = len(timeOfDayLayout) + 1 + 1 + 1 + suffixLen
+	const minLen = len(timeOfDayLayout) + 1 + 1 + 1 + SuffixLen
 	if len(name) < minLen {
 		return RunDirName{}, false
 	}
@@ -152,12 +157,12 @@ func ParseRunDirName(name string) (RunDirName, bool) {
 		return RunDirName{}, false
 	}
 
-	suffix := name[len(name)-suffixLen:]
-	if !isHex(suffix) || name[len(name)-suffixLen-1] != '_' {
+	suffix := name[len(name)-SuffixLen:]
+	if !isHex(suffix) || name[len(name)-SuffixLen-1] != '_' {
 		return RunDirName{}, false
 	}
 
-	dagName := name[len(timeOfDayLayout)+1 : len(name)-suffixLen-1]
+	dagName := name[len(timeOfDayLayout)+1 : len(name)-SuffixLen-1]
 	if dagName == "" {
 		return RunDirName{}, false
 	}
@@ -205,7 +210,7 @@ func runDirName(at time.Time, dagName, dagRunID string) string {
 // path to leave room for user-authored artifact paths beneath it.
 func runSuffix(dagRunID string) string {
 	sum := sha256.Sum256([]byte(dagRunID))
-	return hex.EncodeToString(sum[:])[:suffixLen]
+	return hex.EncodeToString(sum[:])[:SuffixLen]
 }
 
 // safeDAGName reduces a DAG name to characters that are safe in a path segment
