@@ -729,13 +729,19 @@ function DAGRuns() {
   ]);
 
   React.useEffect(() => {
+    // Persistence must wait for the URL/view restoration to complete:
+    // writing the initial default filters before stored state is restored
+    // would clobber the session's filters.
+    if (runViewsLoading) {
+      return;
+    }
     const persisted = lastPersistedFiltersRef.current;
     if (persisted && areFiltersEqual(persisted, currentFilters)) {
       return;
     }
     lastPersistedFiltersRef.current = currentFilters;
     searchState.writeState('dagRuns', searchStateScope, currentFilters);
-  }, [currentFilters, searchState, searchStateScope]);
+  }, [currentFilters, runViewsLoading, searchState, searchStateScope]);
 
   React.useEffect(() => {
     appBarContext.setTitle('Executions');
@@ -875,11 +881,34 @@ function DAGRuns() {
     });
   };
 
+  const applyResolvedFilters = React.useCallback((filters: DAGRunsFilters) => {
+    setSearchText(filters.searchText);
+    setDagRunId(filters.dagRunId);
+    setStatus(filters.status);
+    setSelectedLabels(filters.labels);
+    setFromDate(filters.fromDate);
+    setToDate(filters.toDate);
+    setDateRangeMode(filters.dateRangeMode);
+    setDatePreset(filters.datePreset);
+    setSpecificPeriod(filters.specificPeriod);
+    setSpecificValue(filters.specificValue);
+    setAPISearchText(filters.searchText);
+    setApiDagRunId(filters.dagRunId);
+    setApiStatus(filters.status);
+    setApiLabels(filters.labels);
+    setApiFromDate(filters.fromDate);
+    setApiToDate(filters.toDate);
+  }, []);
+
   const applyRunView = React.useCallback(
     (view: DAGRunsFilterView) => {
       setRunViewError(null);
       const params = new URLSearchParams(location.search);
       const filters = resolveRunViewFilters(view.filters);
+      // Apply the filters directly: when the resulting URL is unchanged
+      // (for example resetting a view that was selected from the dropdown),
+      // the restoration effect has no location change to react to.
+      applyResolvedFilters(filters);
       for (const key of RUN_FILTER_QUERY_KEYS) {
         params.delete(key);
       }
@@ -918,7 +947,13 @@ function DAGRuns() {
         { replace: true }
       );
     },
-    [location.pathname, location.search, navigate, resolveRunViewFilters]
+    [
+      applyResolvedFilters,
+      location.pathname,
+      location.search,
+      navigate,
+      resolveRunViewFilters,
+    ]
   );
 
   const handleSelectRunView = (viewId: string) => {
@@ -930,6 +965,9 @@ function DAGRuns() {
 
   const handleShowAllRuns = () => {
     setRunViewError(null);
+    // Same rationale as applyRunView: the target URL may already be active,
+    // so restore the default filters directly.
+    applyResolvedFilters(cloneFilters(defaultFilters));
     const params = new URLSearchParams(location.search);
     for (const key of RUN_FILTER_QUERY_KEYS) {
       params.delete(key);

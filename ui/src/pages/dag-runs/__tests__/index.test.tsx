@@ -27,9 +27,10 @@ const {
   searchStateMock,
   sharedRunViewState,
   updateRunViewMock,
+  viewsLoadingState,
   writeSearchStateMock,
 } = vi.hoisted(() => {
-  const readState = vi.fn(() => null);
+  const readState = vi.fn((): unknown => null);
   const writeState = vi.fn();
   return {
     createRunViewMock: vi.fn(),
@@ -38,6 +39,7 @@ const {
     readSearchStateMock: readState,
     searchStateMock: { readState, writeState },
     sharedRunViewState: { views: [] as View[] },
+    viewsLoadingState: { current: false },
     writeSearchStateMock: writeState,
   };
 });
@@ -53,7 +55,7 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('@/hooks/useViews', () => ({
   useViews: () => ({
     views: sharedRunViewState.views,
-    isLoading: false,
+    isLoading: viewsLoadingState.current,
     error: undefined,
     createView: createRunViewMock,
     updateView: updateRunViewMock,
@@ -167,6 +169,7 @@ beforeEach(() => {
   readSearchStateMock.mockReturnValue(null);
   writeSearchStateMock.mockReset();
   createRunViewMock.mockReset();
+  viewsLoadingState.current = false;
   updateRunViewMock.mockReset();
   deleteRunViewMock.mockReset();
   sharedRunViewState.views = [];
@@ -263,6 +266,45 @@ describe('DAGRuns page', () => {
     ).toBeVisible();
     expect(screen.queryByRole('heading', { name: /dag runs/i })).toBeNull();
     expect(setTitle).toHaveBeenCalledWith('Executions');
+  });
+
+  it('keeps stored session filters while the shared views load', async () => {
+    // The page reads and writes the same storage; model that so persistence
+    // of the initial defaults while views load is visible to restoration.
+    let stored: unknown = {
+      searchText: 'adhoc',
+      dagRunId: '',
+      status: 'all',
+      labels: [],
+      fromDate: '2026-09-01T00:00',
+      toDate: undefined,
+      dateRangeMode: 'preset',
+      datePreset: 'today',
+      specificPeriod: 'date',
+      specificValue: '2026-09-15',
+    };
+    readSearchStateMock.mockImplementation(() => stored);
+    writeSearchStateMock.mockImplementation(
+      (_key: string, _scope: string, value: unknown) => {
+        stored = value;
+      }
+    );
+    viewsLoadingState.current = true;
+
+    renderPage();
+
+    // Once the views finish loading, the restore must apply the stored
+    // session filters and persist them, not the initial defaults that were
+    // active while loading.
+    viewsLoadingState.current = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() => {
+      expect(lastRunQuery()['name']).toBe('adhoc');
+    });
+    await waitFor(() => {
+      expect((stored as { searchText?: string }).searchText).toBe('adhoc');
+    });
   });
 
   it('passes the initial-load state to the runs table', () => {
@@ -544,6 +586,48 @@ describe('DAGRuns page', () => {
         'deploy'
       );
     });
+  });
+
+  it('resets edited filters when the view was selected from the dropdown', async () => {
+    const user = userEvent.setup();
+    sharedRunViewState.views.push(makeRunView({ dagName: 'deploy' }));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Run view: All runs' })
+      ).toBeVisible();
+    });
+    await user.click(
+      screen.getByRole('button', { name: 'Run view: All runs' })
+    );
+    await user.click(screen.getByRole('menuitem', { name: /failed runs/i }));
+    await waitFor(() => {
+      expect(lastRunQuery()['name']).toBe('deploy');
+      expect(screen.getByPlaceholderText('Filter by DAG name...')).toHaveValue(
+        'deploy'
+      );
+    });
+
+    // Editing without searching leaves the URL, and therefore the reset
+    // target URL, unchanged.
+    fireEvent.change(screen.getByPlaceholderText('Filter by DAG name...'), {
+      target: { value: 'etl' },
+    });
+    expect(screen.getByText('Edited')).toBeVisible();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Run view: Failed runs' })
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Reset changes' }));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Filter by DAG name...')).toHaveValue(
+        'deploy'
+      );
+    });
+    expect(lastRunQuery()['name']).toBe('deploy');
   });
 
   it('restores concrete dates from a legacy URL without dateMode', async () => {
