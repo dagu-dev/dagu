@@ -298,3 +298,104 @@ func TestQueryArtifactsPagination(t *testing.T) {
 		assert.ErrorIs(t, err, persis.ErrInvalidArtifactCursor)
 	})
 }
+
+func TestQueryArtifactsFileNameFilter(t *testing.T) {
+	newFixture := func(t *testing.T) storeFixture {
+		t.Helper()
+		f := newStoreFixture(t)
+		f.index(t, "alpha", "run-1", day2, nil,
+			"reports/summary.md", "reports/q3.csv", "data/nested/deep.csv", "logs/stdout.txt")
+		return f
+	}
+
+	paths := func(page persis.ArtifactPage) []string {
+		out := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			out = append(out, item.Path)
+		}
+		return out
+	}
+
+	t.Run("Substring", func(t *testing.T) {
+		f := newFixture(t)
+		assert.Equal(t, []string{"reports/summary.md"},
+			paths(f.query(t, persis.ArtifactQuery{FileName: "summary"})))
+	})
+
+	t.Run("SubstringIsCaseInsensitive", func(t *testing.T) {
+		f := newFixture(t)
+		assert.Equal(t, []string{"reports/summary.md"},
+			paths(f.query(t, persis.ArtifactQuery{FileName: "SUMMARY"})))
+	})
+
+	t.Run("SubstringMatchesDirectorySegment", func(t *testing.T) {
+		f := newFixture(t)
+		assert.ElementsMatch(t, []string{"reports/summary.md", "reports/q3.csv"},
+			paths(f.query(t, persis.ArtifactQuery{FileName: "reports/"})))
+	})
+
+	// A glob segment stops at a separator; ** crosses it.
+	t.Run("GlobDoesNotCrossSeparator", func(t *testing.T) {
+		f := newFixture(t)
+		assert.Equal(t, []string{"reports/q3.csv"},
+			paths(f.query(t, persis.ArtifactQuery{FileName: "reports/*.csv"})))
+	})
+
+	t.Run("GlobCrossesSeparatorWithDoubleStar", func(t *testing.T) {
+		f := newFixture(t)
+		assert.ElementsMatch(t, []string{"reports/q3.csv", "data/nested/deep.csv"},
+			paths(f.query(t, persis.ArtifactQuery{FileName: "**/*.csv"})))
+	})
+
+	// "*.csv" is a glob anchored at the path root, so it must not behave like
+	// the substring ".csv" and match nested paths.
+	t.Run("GlobIsNotTreatedAsSubstring", func(t *testing.T) {
+		f := newFixture(t)
+		assert.Empty(t, paths(f.query(t, persis.ArtifactQuery{FileName: "*.csv"})))
+		assert.ElementsMatch(t, []string{"reports/q3.csv", "data/nested/deep.csv"},
+			paths(f.query(t, persis.ArtifactQuery{FileName: ".csv"})))
+	})
+
+	t.Run("ComposesWithNameAndDateRange", func(t *testing.T) {
+		f := newFixture(t)
+		f.index(t, "beta", "run-2", day2b, nil, "reports/summary.md")
+
+		page := f.query(t, persis.ArtifactQuery{
+			FileName: "summary",
+			Name:     "alpha",
+			From:     persis.NewUTC(day2.Add(-time.Hour)),
+		})
+
+		assert.Equal(t, []string{"run-1"}, runIDs(page))
+	})
+
+	// A run contributing nothing must not end the page early.
+	t.Run("RunWithoutMatchDoesNotEndPage", func(t *testing.T) {
+		f := newStoreFixture(t)
+		f.index(t, "older", "run-old", day1, nil, "reports/summary.md")
+		f.index(t, "newer", "run-new", day2, nil, "logs/stdout.txt")
+
+		page := f.query(t, persis.ArtifactQuery{FileName: "summary"})
+
+		assert.Equal(t, []string{"run-old"}, runIDs(page))
+	})
+
+	t.Run("PagesFilteredResults", func(t *testing.T) {
+		f := newFixture(t)
+
+		for _, limit := range []int{1, 2, 3} {
+			var seen []string
+			query := persis.ArtifactQuery{FileName: ".csv", Limit: limit}
+			for {
+				page := f.query(t, query)
+				seen = append(seen, paths(page)...)
+				if page.NextCursor == "" {
+					break
+				}
+				query.Cursor = page.NextCursor
+			}
+			assert.ElementsMatch(t,
+				[]string{"reports/q3.csv", "data/nested/deep.csv"}, seen, "limit %d", limit)
+		}
+	})
+}

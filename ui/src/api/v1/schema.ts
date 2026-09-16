@@ -6796,6 +6796,8 @@ export interface components {
         WikiPagePrefix: components["schemas"]["WikiPagePath"];
         /** @description Filter by DAG names containing this value */
         ArtifactDAGName: string;
+        /** @description Filter by artifact path. A value containing glob metacharacters (* ? [ {) is matched as a glob against the path relative to the DAG-run artifact directory; any other value is matched as a case-insensitive substring of that path. */
+        ArtifactFileName: string;
         /** @description Number of artifact files to return (default 100, max 500) */
         ArtifactListLimit: number;
         /** @description Opaque cursor returned by the previous artifact list response */
@@ -9001,6 +9003,8 @@ export interface operations {
                 toDate?: components["parameters"]["DateTimeTo"];
                 /** @description Filter by DAG names containing this value */
                 name?: components["parameters"]["ArtifactDAGName"];
+                /** @description Filter by artifact path. A value containing glob metacharacters (* ? [ {) is matched as a glob against the path relative to the DAG-run artifact directory; any other value is matched as a case-insensitive substring of that path. */
+                fileName?: components["parameters"]["ArtifactFileName"];
                 /** @description Number of artifact files to return (default 100, max 500) */
                 limit?: components["parameters"]["ArtifactListLimit"];
                 /** @description Opaque cursor returned by the previous artifact list response */
@@ -9021,7 +9025,7 @@ export interface operations {
                     "application/json": components["schemas"]["ArtifactListResponse"];
                 };
             };
-            /** @description Invalid cursor or pagination parameters */
+            /** @description Invalid cursor, file name pattern, or pagination parameters */
             400: {
                 headers: {
                     [name: string]: unknown;

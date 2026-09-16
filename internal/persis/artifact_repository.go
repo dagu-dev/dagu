@@ -3,7 +3,12 @@
 
 package persis
 
-import "context"
+import (
+	"context"
+	"fmt"
+
+	"github.com/bmatcuk/doublestar/v4"
+)
 
 const (
 	defaultArtifactListLimit = 100
@@ -31,6 +36,11 @@ func (r *ArtifactRepository) List(ctx context.Context, query ArtifactQuery) (Art
 		query.Limit = defaultArtifactListLimit
 	case query.Limit > maxArtifactListLimit:
 		query.Limit = maxArtifactListLimit
+	}
+	// A malformed glob is reported rather than left to match nothing, which
+	// would read as "no artifacts" instead of "bad pattern".
+	if IsArtifactFileNameGlob(query.FileName) && !doublestar.ValidatePattern(query.FileName) {
+		return ArtifactPage{}, fmt.Errorf("%w: %s", ErrInvalidArtifactFileName, query.FileName)
 	}
 	return r.store.QueryArtifacts(ctx, query)
 }

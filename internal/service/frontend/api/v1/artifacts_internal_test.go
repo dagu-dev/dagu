@@ -31,7 +31,11 @@ func newArtifactListAPI(t *testing.T, runs ...string) *API {
 		at := artifactTestStart.Add(time.Duration(i) * time.Minute)
 		dir, err := artifactpath.NewRunDir(context.Background(), root, "", "reporter", dagRunID, at)
 		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "out.txt"), []byte("hello"), 0o600))
+		for _, name := range []string{"out.txt", "reports/summary.md"} {
+			path := filepath.Join(dir, filepath.FromSlash(name))
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
+			require.NoError(t, os.WriteFile(path, []byte("hello"), 0o600))
+		}
 
 		metaPath, ok := artifactpath.MetaPath(root, dir)
 		require.True(t, ok)
@@ -57,14 +61,22 @@ func listArtifacts(t *testing.T, a *API, params openapiv1.ListArtifactsParams) o
 	return openapiv1.ArtifactListResponse(body)
 }
 
+func itemRunIDs(body openapiv1.ArtifactListResponse) []string {
+	ids := make([]string, 0, len(body.Items))
+	for _, item := range body.Items {
+		ids = append(ids, item.DagRunId)
+	}
+	return ids
+}
+
 func TestListArtifacts(t *testing.T) {
 	t.Run("NewestRunFirst", func(t *testing.T) {
 		a := newArtifactListAPI(t, "run-1", "run-2")
 
 		body := listArtifacts(t, a, openapiv1.ListArtifactsParams{})
 
-		require.Len(t, body.Items, 2)
-		assert.Equal(t, "run-2", body.Items[0].DagRunId)
+		require.Len(t, body.Items, 4)
+		assert.Equal(t, []string{"run-2", "run-2", "run-1", "run-1"}, itemRunIDs(body))
 		assert.Equal(t, "reporter", body.Items[0].Name)
 		assert.Equal(t, "out.txt", body.Items[0].Path)
 		assert.Equal(t, int64(len("hello")), body.Items[0].Size)
@@ -76,13 +88,22 @@ func TestListArtifacts(t *testing.T) {
 		a := newArtifactListAPI(t, "run-1", "run-2")
 		limit := 1
 
-		first := listArtifacts(t, a, openapiv1.ListArtifactsParams{Limit: &limit})
-		require.Len(t, first.Items, 1)
-		require.NotNil(t, first.NextCursor)
+		var seen []string
+		params := openapiv1.ListArtifactsParams{Limit: &limit}
+		for {
+			page := listArtifacts(t, a, params)
+			require.Len(t, page.Items, 1)
+			seen = append(seen, page.Items[0].DagRunId+"/"+page.Items[0].Path)
+			if page.NextCursor == nil {
+				break
+			}
+			params.Cursor = page.NextCursor
+		}
 
-		second := listArtifacts(t, a, openapiv1.ListArtifactsParams{Limit: &limit, Cursor: first.NextCursor})
-		require.Len(t, second.Items, 1)
-		assert.NotEqual(t, first.Items[0].DagRunId, second.Items[0].DagRunId)
+		assert.Equal(t, []string{
+			"run-2/out.txt", "run-2/reports/summary.md",
+			"run-1/out.txt", "run-1/reports/summary.md",
+		}, seen)
 	})
 
 	t.Run("RejectsMalformedCursor", func(t *testing.T) {
@@ -91,6 +112,29 @@ func TestListArtifacts(t *testing.T) {
 
 		_, err := a.ListArtifacts(context.Background(),
 			openapiv1.ListArtifactsRequestObject{Params: openapiv1.ListArtifactsParams{Cursor: &cursor}})
+
+		var apiErr *Error
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.HTTPStatus)
+	})
+
+	t.Run("FiltersByFileName", func(t *testing.T) {
+		a := newArtifactListAPI(t, "run-1")
+		fileName := "summary"
+
+		body := listArtifacts(t, a, openapiv1.ListArtifactsParams{FileName: &fileName})
+
+		require.Len(t, body.Items, 1)
+		assert.Equal(t, "reports/summary.md", body.Items[0].Path)
+	})
+
+	// A malformed glob is reported rather than silently matching nothing.
+	t.Run("RejectsInvalidGlob", func(t *testing.T) {
+		a := newArtifactListAPI(t, "run-1")
+		fileName := "reports/["
+
+		_, err := a.ListArtifacts(context.Background(),
+			openapiv1.ListArtifactsRequestObject{Params: openapiv1.ListArtifactsParams{FileName: &fileName}})
 
 		var apiErr *Error
 		require.ErrorAs(t, err, &apiErr)

@@ -147,6 +147,9 @@ func (s *Store) collectDay(
 			if from != "" && !walkOrderAfter(relPath, from) {
 				return true
 			}
+			if !persis.MatchArtifactFileName(relPath, query.FileName) {
+				return true
+			}
 			if len(page.Items) == query.Limit {
 				full = true
 				return false

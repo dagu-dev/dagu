@@ -28,6 +28,9 @@ func (a *API) ListArtifacts(
 	if request.Params.Name != nil {
 		query.Name = *request.Params.Name
 	}
+	if request.Params.FileName != nil {
+		query.FileName = *request.Params.FileName
+	}
 	if request.Params.FromDate != nil {
 		query.From = persis.NewUTC(time.Unix(*request.Params.FromDate, 0))
 	}
@@ -43,7 +46,8 @@ func (a *API) ListArtifacts(
 
 	page, err := a.artifactRepository.List(ctx, query)
 	if err != nil {
-		if errors.Is(err, persis.ErrInvalidArtifactCursor) {
+		if errors.Is(err, persis.ErrInvalidArtifactCursor) ||
+			errors.Is(err, persis.ErrInvalidArtifactFileName) {
 			return nil, &Error{
 				HTTPStatus: http.StatusBadRequest,
 				Code:       api.ErrorCodeBadRequest,
