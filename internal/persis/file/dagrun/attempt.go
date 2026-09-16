@@ -248,7 +248,11 @@ func (att *Attempt) Write(ctx context.Context, status ir.DAGRunStatus) error {
 // Directories written before the date layout have no place in the index and
 // are skipped.
 func (att *Attempt) updateArtifactIndex(status ir.DAGRunStatus) error {
-	if att.artifactRoot == "" || status.ArchiveDir == "" || status.Status.IsActive() {
+	// NotStarted is not active either, so testing IsActive alone would index a
+	// run before it has run. A retry reuses a directory that already holds the
+	// previous attempt's files, so the emptiness check below does not catch it.
+	if att.artifactRoot == "" || status.ArchiveDir == "" ||
+		status.Status == ir.NotStarted || status.Status.IsActive() {
 		return nil
 	}
 	metaPath, ok := artifactpath.MetaPath(att.artifactRoot, status.ArchiveDir)

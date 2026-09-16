@@ -5,6 +5,7 @@
 package artifact
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,8 +81,11 @@ func WriteRecord(path string, rec Record) error {
 		return fmt.Errorf("write artifact record: %w", writeErr)
 	}
 
-	existing, err := ReadRecord(path)
-	if err == nil && existing.AttemptID == rec.AttemptID {
+	// Comparing the encoded record rather than the attempt it came from keeps a
+	// repeated write free while letting anything that actually changed win,
+	// including a later attempt and a run whose outcome was revised.
+	existing, err := fileutil.ReadFile(path)
+	if err == nil && bytes.Equal(existing, data) {
 		return nil
 	}
 	if err := fileutil.WriteFileAtomic(path, data, 0600); err != nil {

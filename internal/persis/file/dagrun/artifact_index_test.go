@@ -113,6 +113,48 @@ func TestArtifactIndexWrite(t *testing.T) {
 	})
 
 	// A run that wrote nothing has nothing to list, so it stays out of the index.
+	// NotStarted is not "active", so a guard written as !IsActive() lets a
+	// pre-execution status through. A retry reuses a directory that already
+	// holds files, so nothing else stops it.
+	t.Run("SkipsNotStartedStatus", func(t *testing.T) {
+		f := newArtifactIndexFixture(t)
+		dir := f.runDir(t, f.artifactRoot, "run-1", true)
+
+		f.write(t, "run-1", ir.NotStarted, dir, false)
+
+		assert.NoFileExists(t, dir+artifactpath.MetaSuffix)
+	})
+
+	t.Run("TerminalWriteAfterNotStartedWins", func(t *testing.T) {
+		f := newArtifactIndexFixture(t)
+		dir := f.runDir(t, f.artifactRoot, "run-1", true)
+
+		attempt := f.write(t, "run-1", ir.NotStarted, dir, false)
+		require.NoError(t, attempt.Open(f.th.Context))
+		f.writeTo(t, attempt, "run-1", ir.Succeeded, dir)
+		require.NoError(t, attempt.Close(f.th.Context))
+
+		rec, err := artifact.ReadRecord(dir + artifactpath.MetaSuffix)
+		require.NoError(t, err)
+		assert.Equal(t, ir.Succeeded, rec.Status)
+	})
+
+	// The agent can turn a succeeded run into a failed one when uploading its
+	// artifacts fails, on the same attempt.
+	t.Run("ChangedStatusOnSameAttemptReplacesRecord", func(t *testing.T) {
+		f := newArtifactIndexFixture(t)
+		dir := f.runDir(t, f.artifactRoot, "run-1", true)
+
+		attempt := f.write(t, "run-1", ir.Succeeded, dir, false)
+		require.NoError(t, attempt.Open(f.th.Context))
+		f.writeTo(t, attempt, "run-1", ir.Failed, dir)
+		require.NoError(t, attempt.Close(f.th.Context))
+
+		rec, err := artifact.ReadRecord(dir + artifactpath.MetaSuffix)
+		require.NoError(t, err)
+		assert.Equal(t, ir.Failed, rec.Status)
+	})
+
 	t.Run("SkipsEmptyArtifactDir", func(t *testing.T) {
 		f := newArtifactIndexFixture(t)
 		dir := f.runDir(t, f.artifactRoot, "run-1", false)
