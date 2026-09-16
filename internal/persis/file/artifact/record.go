@@ -28,14 +28,21 @@ const RecordVersion = 1
 // It carries the identity that the directory name deliberately omits, so a
 // listing can walk the date tree and read names alone until it needs detail.
 type Record struct {
-	Version    int       `json:"v"`
-	Name       string    `json:"name"`
-	DAGRunID   string    `json:"dagRunId"`
-	AttemptID  string    `json:"attemptId,omitempty"`
-	Status     ir.Status `json:"status"`
-	StartedAt  string    `json:"startedAt,omitempty"`
-	FinishedAt string    `json:"finishedAt,omitempty"`
-	Labels     []string  `json:"labels,omitempty"`
+	Version   int       `json:"v"`
+	Name      string    `json:"name"`
+	DAGRunID  string    `json:"dagRunId"`
+	AttemptID string    `json:"attemptId,omitempty"`
+	Status    ir.Status `json:"status"`
+
+	// RootName and RootDAGRunID address the run this one belongs to. A child
+	// run is indexed under its own name and ID, which the sub-run endpoints
+	// cannot be reached with on their own. A root run names itself.
+	RootName     string `json:"rootName,omitempty"`
+	RootDAGRunID string `json:"rootDagRunId,omitempty"`
+
+	StartedAt  string   `json:"startedAt,omitempty"`
+	FinishedAt string   `json:"finishedAt,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
 
 	// Dir is absolute, and points outside the date tree when the DAG relocates
 	// its artifacts with artifacts.dir.
@@ -44,16 +51,25 @@ type Record struct {
 
 // RecordFromStatus builds the sidecar contents for a finished DAG-run.
 func RecordFromStatus(status ir.DAGRunStatus) Record {
+	// Not every writer populates the root, so an absent one reads as self
+	// rather than leaving the run unaddressable.
+	root := status.Root
+	if root.Zero() {
+		root = ir.NewDAGRunRef(status.Name, status.DAGRunID)
+	}
+
 	return Record{
-		Version:    RecordVersion,
-		Name:       status.Name,
-		DAGRunID:   status.DAGRunID,
-		AttemptID:  status.AttemptID,
-		Status:     status.Status,
-		StartedAt:  status.StartedAt,
-		FinishedAt: status.FinishedAt,
-		Labels:     status.Labels,
-		Dir:        status.ArchiveDir,
+		Version:      RecordVersion,
+		Name:         status.Name,
+		DAGRunID:     status.DAGRunID,
+		AttemptID:    status.AttemptID,
+		Status:       status.Status,
+		RootName:     root.Name,
+		RootDAGRunID: root.ID,
+		StartedAt:    status.StartedAt,
+		FinishedAt:   status.FinishedAt,
+		Labels:       status.Labels,
+		Dir:          status.ArchiveDir,
 	}
 }
 
@@ -105,7 +121,9 @@ func ReadRecord(path string) (*Record, error) {
 	if err := json.Unmarshal(data, &rec); err != nil {
 		return nil, fmt.Errorf("decode artifact record %s: %w", path, err)
 	}
-	if rec.Version != RecordVersion {
+	// Only a newer format is unreadable. An older one decodes with its added
+	// fields left zero, which every reader already has to handle.
+	if rec.Version > RecordVersion {
 		return nil, fmt.Errorf("unsupported artifact record version %d in %s", rec.Version, path)
 	}
 	return &rec, nil

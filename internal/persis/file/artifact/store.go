@@ -155,11 +155,13 @@ func (s *Store) collectDay(
 				return false
 			}
 			page.Items = append(page.Items, persis.ArtifactFile{
-				Name:      rec.Name,
-				DAGRunID:  rec.DAGRunID,
-				StartedAt: startedAt,
-				Path:      relPath,
-				Size:      size,
+				Name:         rec.Name,
+				DAGRunID:     rec.DAGRunID,
+				StartedAt:    startedAt,
+				RootName:     rec.RootName,
+				RootDAGRunID: rec.RootDAGRunID,
+				Path:         relPath,
+				Size:         size,
 			})
 			page.NextCursor = encodeCursor(query, day, runDir.name, relPath)
 			return true

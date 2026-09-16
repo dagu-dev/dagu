@@ -60,10 +60,12 @@ func (a *API) ListArtifacts(
 	items := make([]api.ArtifactListItem, 0, len(page.Items))
 	for _, item := range page.Items {
 		entry := api.ArtifactListItem{
-			Name:     item.Name,
-			DagRunId: item.DAGRunID,
-			Path:     item.Path,
-			Size:     item.Size,
+			Name:           item.Name,
+			DagRunId:       item.DAGRunID,
+			RootDAGRunName: item.RootName,
+			RootDAGRunId:   item.RootDAGRunID,
+			Path:           item.Path,
+			Size:           item.Size,
 		}
 		if !item.StartedAt.IsZero() {
 			entry.StartedAt = ptrOf(stringutil.FormatTime(item.StartedAt))

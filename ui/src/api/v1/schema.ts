@@ -5171,6 +5171,8 @@ export interface components {
         ArtifactListItem: {
             name: components["schemas"]["DAGName"];
             dagRunId: components["schemas"]["DAGRunId"];
+            rootDAGRunName: components["schemas"]["DAGName"];
+            rootDAGRunId: components["schemas"]["DAGRunId"];
             /** @description RFC 3339 timestamp of when the producing DAG-run started */
             startedAt?: string;
             /** @description Path of the file relative to the DAG-run artifact directory */

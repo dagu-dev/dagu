@@ -13178,6 +13178,10 @@ components:
           $ref: "#/components/schemas/DAGName"
         dagRunId:
           $ref: "#/components/schemas/DAGRunId"
+        rootDAGRunName:
+          $ref: "#/components/schemas/DAGName"
+        rootDAGRunId:
+          $ref: "#/components/schemas/DAGRunId"
         startedAt:
           type: string
           description: "RFC 3339 timestamp of when the producing DAG-run started"
@@ -13191,6 +13195,8 @@ components:
       required:
         - name
         - dagRunId
+        - rootDAGRunName
+        - rootDAGRunId
         - path
         - size
 

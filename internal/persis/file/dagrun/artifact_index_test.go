@@ -25,6 +25,9 @@ type artifactIndexFixture struct {
 	th           RepositoryTest
 	artifactRoot string
 	dag          *ir.DAG
+
+	// root is the run the artifacts belong to, left zero for a root run.
+	root ir.DAGRunRef
 }
 
 func newArtifactIndexFixture(t *testing.T) artifactIndexFixture {
@@ -85,6 +88,7 @@ func (f artifactIndexFixture) writeTo(
 	st.Status = status
 	st.ArchiveDir = archiveDir
 	st.AttemptID = attempt.ID()
+	st.Root = f.root
 	require.NoError(t, attempt.Write(f.th.Context, st))
 }
 
@@ -223,6 +227,37 @@ func TestArtifactIndexWrite(t *testing.T) {
 		rec, err := artifact.ReadRecord(metaPath)
 		require.NoError(t, err)
 		assert.Equal(t, dir, rec.Dir)
+	})
+}
+
+// A child run is indexed under its own name and ID, which cannot address the
+// sub-run endpoints on their own. The record carries the root so a caller can.
+func TestArtifactIndexHierarchy(t *testing.T) {
+	t.Run("ChildRecordsItsRoot", func(t *testing.T) {
+		f := newArtifactIndexFixture(t)
+		f.root = ir.NewDAGRunRef("parent-dag", "parent-run")
+		dir := f.runDir(t, f.artifactRoot, "child-run", true)
+
+		f.write(t, "child-run", ir.Succeeded, dir, false)
+
+		rec, err := artifact.ReadRecord(dir + artifactpath.MetaSuffix)
+		require.NoError(t, err)
+		assert.Equal(t, "parent-dag", rec.RootName)
+		assert.Equal(t, "parent-run", rec.RootDAGRunID)
+	})
+
+	// Not every writer sets the root, so a record without one has to read as
+	// its own root rather than as a child of nothing.
+	t.Run("RootRunRecordsItself", func(t *testing.T) {
+		f := newArtifactIndexFixture(t)
+		dir := f.runDir(t, f.artifactRoot, "run-1", true)
+
+		f.write(t, "run-1", ir.Succeeded, dir, false)
+
+		rec, err := artifact.ReadRecord(dir + artifactpath.MetaSuffix)
+		require.NoError(t, err)
+		assert.Equal(t, f.dag.Name, rec.RootName)
+		assert.Equal(t, "run-1", rec.RootDAGRunID)
 	})
 }
 

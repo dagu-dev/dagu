@@ -14,6 +14,7 @@ import (
 	openapiv1 "github.com/dagucloud/dagu/v2/api/v1"
 	"github.com/dagucloud/dagu/v2/internal/cmn/artifactpath"
 	"github.com/dagucloud/dagu/v2/internal/cmn/stringutil"
+	"github.com/dagucloud/dagu/v2/internal/ir"
 	"github.com/dagucloud/dagu/v2/internal/persis"
 	fileartifact "github.com/dagucloud/dagu/v2/internal/persis/file/artifact"
 	"github.com/stretchr/testify/assert"
@@ -22,8 +23,15 @@ import (
 
 var artifactTestStart = time.Date(2026, 9, 15, 14, 32, 7, 0, time.UTC)
 
-// newArtifactListAPI builds an API over a populated artifact tree.
+// newArtifactListAPI builds an API over a populated artifact tree whose runs
+// are their own root.
 func newArtifactListAPI(t *testing.T, runs ...string) *API {
+	t.Helper()
+	return newArtifactListAPIWithRoot(t, ir.DAGRunRef{}, runs...)
+}
+
+// newArtifactListAPIWithRoot builds the same tree for runs belonging to root.
+func newArtifactListAPIWithRoot(t *testing.T, rootRun ir.DAGRunRef, runs ...string) *API {
 	t.Helper()
 
 	root := t.TempDir()
@@ -39,13 +47,14 @@ func newArtifactListAPI(t *testing.T, runs ...string) *API {
 
 		metaPath, ok := artifactpath.MetaPath(root, dir)
 		require.True(t, ok)
-		require.NoError(t, fileartifact.WriteRecord(metaPath, fileartifact.Record{
-			Version:   fileartifact.RecordVersion,
-			Name:      "reporter",
-			DAGRunID:  dagRunID,
-			StartedAt: stringutil.FormatTime(at),
-			Dir:       dir,
-		}))
+		status := ir.DAGRunStatus{
+			Name:       "reporter",
+			DAGRunID:   dagRunID,
+			StartedAt:  stringutil.FormatTime(at),
+			ArchiveDir: dir,
+			Root:       rootRun,
+		}
+		require.NoError(t, fileartifact.WriteRecord(metaPath, fileartifact.RecordFromStatus(status)))
 	}
 
 	return &API{artifactRepository: persis.NewArtifactRepository(fileartifact.NewStore(root))}
@@ -139,6 +148,29 @@ func TestListArtifacts(t *testing.T) {
 		var apiErr *Error
 		require.ErrorAs(t, err, &apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.HTTPStatus)
+	})
+
+	// A child run is listed under its own name and ID, which cannot address the
+	// sub-run endpoints. The root pair is what makes the row followable.
+	t.Run("ExposesRootForChildRun", func(t *testing.T) {
+		a := newArtifactListAPIWithRoot(t, ir.NewDAGRunRef("parent", "parent-run"), "child-run")
+
+		body := listArtifacts(t, a, openapiv1.ListArtifactsParams{})
+
+		require.NotEmpty(t, body.Items)
+		assert.Equal(t, "parent", body.Items[0].RootDAGRunName)
+		assert.Equal(t, "parent-run", body.Items[0].RootDAGRunId)
+		assert.NotEqual(t, body.Items[0].DagRunId, body.Items[0].RootDAGRunId)
+	})
+
+	t.Run("RootRunReportsItself", func(t *testing.T) {
+		a := newArtifactListAPI(t, "run-1")
+
+		body := listArtifacts(t, a, openapiv1.ListArtifactsParams{})
+
+		require.NotEmpty(t, body.Items)
+		assert.Equal(t, body.Items[0].Name, body.Items[0].RootDAGRunName)
+		assert.Equal(t, body.Items[0].DagRunId, body.Items[0].RootDAGRunId)
 	})
 
 	// A deployment that never enabled artifacts has no repository wired.

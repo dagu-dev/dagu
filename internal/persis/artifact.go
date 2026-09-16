@@ -58,6 +58,11 @@ type ArtifactFile struct {
 	DAGRunID  string
 	StartedAt time.Time
 
+	// RootName and RootDAGRunID address the run this one belongs to, naming
+	// the run itself when it is not a child.
+	RootName     string
+	RootDAGRunID string
+
 	// Path is relative to the run's artifact directory and uses forward
 	// slashes on every platform.
 	Path string
