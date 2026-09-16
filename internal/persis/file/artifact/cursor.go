@@ -65,6 +65,8 @@ func filterFingerprint(query persis.ArtifactQuery) string {
 	var b strings.Builder
 	b.WriteString(query.Name)
 	b.WriteByte(0)
+	b.WriteString(query.FileName)
+	b.WriteByte(0)
 	b.WriteString(query.From.Format(fingerprintTimeLayout))
 	b.WriteByte(0)
 	b.WriteString(query.To.Format(fingerprintTimeLayout))

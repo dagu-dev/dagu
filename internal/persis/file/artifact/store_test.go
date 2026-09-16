@@ -278,17 +278,35 @@ func TestQueryArtifactsPagination(t *testing.T) {
 		}
 	})
 
+	// Every filter has to be part of the fingerprint. One that is not lets a
+	// cursor issued under a different filter resume past entries the new one
+	// would have matched.
 	t.Run("RejectsCursorFromDifferentFilters", func(t *testing.T) {
-		f := newStoreFixture(t)
-		f.index(t, "alpha", "run-1", day2, nil, "a1.txt", "a2.txt")
+		changed := []struct {
+			name  string
+			query persis.ArtifactQuery
+		}{
+			{"Name", persis.ArtifactQuery{Limit: 1, Name: "alpha"}},
+			{"FileName", persis.ArtifactQuery{Limit: 1, FileName: "a1"}},
+			{"From", persis.ArtifactQuery{Limit: 1, From: persis.NewUTC(day1)}},
+			{"To", persis.ArtifactQuery{Limit: 1, To: persis.NewUTC(day2b)}},
+			{"Workspace", persis.ArtifactQuery{Limit: 1, WorkspaceFilter: &workspace.WorkspaceFilter{
+				Enabled: true, Workspaces: []string{"alpha"},
+			}}},
+		}
+		for _, tt := range changed {
+			t.Run(tt.name, func(t *testing.T) {
+				f := newStoreFixture(t)
+				f.index(t, "alpha", "run-1", day2, nil, "a1.txt", "a2.txt")
 
-		page := f.query(t, persis.ArtifactQuery{Limit: 1})
-		require.NotEmpty(t, page.NextCursor)
+				page := f.query(t, persis.ArtifactQuery{Limit: 1})
+				require.NotEmpty(t, page.NextCursor)
 
-		_, err := f.store.QueryArtifacts(context.Background(), persis.ArtifactQuery{
-			Limit: 1, Name: "alpha", Cursor: page.NextCursor,
-		})
-		assert.ErrorIs(t, err, persis.ErrInvalidArtifactCursor)
+				tt.query.Cursor = page.NextCursor
+				_, err := f.store.QueryArtifacts(context.Background(), tt.query)
+				assert.ErrorIs(t, err, persis.ErrInvalidArtifactCursor)
+			})
+		}
 	})
 
 	t.Run("RejectsMalformedCursor", func(t *testing.T) {
