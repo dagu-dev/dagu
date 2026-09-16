@@ -1355,6 +1355,35 @@ func TestRemoteHandler_UniqueLogDirs(t *testing.T) {
 	assert.NotEqual(t, env1.logDir, env2.logDir, "different dagRunIDs should produce different log directories")
 }
 
+// The worker tracks tasks by attempt, not by run, so a retry dispatched while
+// the previous attempt is still finalising gives one worker two live tasks for
+// the same run. Sharing a staging directory would let the first to finish
+// delete the other's artifacts.
+func TestCreateAgentEnv_SameRunIDGetsSeparateStaging(t *testing.T) {
+	t.Parallel()
+
+	handler := &remoteTaskHandler{workerID: "staging-worker"}
+	dag := &ir.DAG{Name: "staged", Artifacts: &ir.ArtifactsConfig{Enabled: true}}
+	ctx := context.Background()
+
+	first, err := handler.createAgentEnv(ctx, dag, "run-shared")
+	require.NoError(t, err)
+	defer first.cleanup()
+
+	second, err := handler.createAgentEnv(ctx, dag, "run-shared")
+	require.NoError(t, err)
+	defer second.cleanup()
+
+	require.NotEmpty(t, first.artifactDir)
+	assert.NotEqual(t, first.artifactDir, second.artifactDir)
+
+	require.NoError(t, os.WriteFile(filepath.Join(first.artifactDir, "kept.txt"), []byte("x"), 0o600))
+	second.cleanup()
+
+	assert.FileExists(t, filepath.Join(first.artifactDir, "kept.txt"),
+		"cleaning up one attempt removed the other attempt's artifacts")
+}
+
 func TestHandle_OperationStart(t *testing.T) {
 	t.Parallel()
 

@@ -575,6 +575,16 @@ type agentEnv struct {
 	cleanup     func()
 }
 
+// stagingPrefix names a staging directory after the run it serves, trimmed so
+// the random suffix MkdirTemp appends stays within a path segment.
+func stagingPrefix(dagRunID string) string {
+	const maxPrefixLen = 29
+	if len(dagRunID) > maxPrefixLen {
+		dagRunID = dagRunID[:maxPrefixLen]
+	}
+	return dagRunID + "-"
+}
+
 // createAgentEnv creates temporary directories for agent execution.
 // The cleanup function must be called after execution completes.
 // Includes workerID in path to prevent collisions with concurrent workers on the same host.
@@ -586,12 +596,21 @@ func (h *remoteTaskHandler) createAgentEnv(ctx context.Context, dag *ir.DAG, dag
 
 	// Staging only. The coordinator assigns the durable path when it persists
 	// the reported status, so this name never needs to match the server tree.
+	//
+	// It does need to be unique. The worker tracks tasks by attempt, not by
+	// run, so two attempts of one run can execute here at once, and the
+	// cleanup below removes whatever it was given.
 	artifactDir := ""
 	if dag != nil && dag.ArtifactsEnabled() {
-		artifactDir = filepath.Join(os.TempDir(), "dagu", "worker-artifacts", h.workerID, dagRunID)
-		if err := os.MkdirAll(artifactDir, 0o750); err != nil {
+		stagingRoot := filepath.Join(os.TempDir(), "dagu", "worker-artifacts", h.workerID)
+		if err := os.MkdirAll(stagingRoot, 0o750); err != nil {
 			return nil, fmt.Errorf("failed to create artifact directory: %w", err)
 		}
+		dir, err := os.MkdirTemp(stagingRoot, stagingPrefix(dagRunID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create artifact directory: %w", err)
+		}
+		artifactDir = dir
 	}
 
 	return &agentEnv{
