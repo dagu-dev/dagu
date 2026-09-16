@@ -62,7 +62,8 @@ func (s *Store) QueryArtifacts(ctx context.Context, query persis.ArtifactQuery) 
 		return persis.ArtifactPage{}, err
 	}
 
-	days, err := s.listDaysDesc(query)
+	bounds := newQueryBounds(query)
+	days, err := s.listDaysDesc(bounds)
 	if err != nil {
 		return persis.ArtifactPage{}, err
 	}
@@ -76,7 +77,7 @@ func (s *Store) QueryArtifacts(ctx context.Context, query persis.ArtifactQuery) 
 			continue
 		}
 
-		done, err := s.collectDay(ctx, query, resume, day, &page)
+		done, err := s.collectDay(ctx, query, resume, day, bounds, &page)
 		if err != nil {
 			return persis.ArtifactPage{}, err
 		}
@@ -97,13 +98,13 @@ func (s *Store) collectDay(
 	query persis.ArtifactQuery,
 	resume *cursor,
 	day string,
+	bounds queryBounds,
 	page *persis.ArtifactPage,
 ) (bool, error) {
 	runDirs, err := s.listRunDirsDesc(day)
 	if err != nil {
 		return false, err
 	}
-	fromBound, toBound := timeBounds(query)
 
 	for _, runDir := range runDirs {
 		if err := ctx.Err(); err != nil {
@@ -125,7 +126,7 @@ func (s *Store) collectDay(
 		if !matchesName(runDir.dagName, query.Name) {
 			continue
 		}
-		if outsideBounds(day+runDir.timeOfDay, fromBound, toBound) {
+		if outsideBounds(day+runDir.timeOfDay, bounds.from, bounds.to) {
 			continue
 		}
 
@@ -248,8 +249,8 @@ func (s *Store) listRunDirsDesc(day string) ([]runDirEntry, error) {
 
 // listDaysDesc returns the "YYYY/MM/DD" days present in the tree within the
 // query's range, newest first.
-func (s *Store) listDaysDesc(query persis.ArtifactQuery) ([]string, error) {
-	from, to := timeBounds(query)
+func (s *Store) listDaysDesc(bounds queryBounds) ([]string, error) {
+	from, to := bounds.from, bounds.to
 
 	years, err := listNumericDirsDesc(s.rootDir, 4)
 	if err != nil {
@@ -305,6 +306,13 @@ func outsideBounds(key, from, to string) bool {
 // run's day and directory name concatenate to. outsideBounds truncates a bound
 // to its caller's width, so one string serves the year, month, day and second
 // comparisons alike.
+type queryBounds struct{ from, to string }
+
+func newQueryBounds(query persis.ArtifactQuery) queryBounds {
+	from, to := timeBounds(query)
+	return queryBounds{from: from, to: to}
+}
+
 func timeBounds(query persis.ArtifactQuery) (from, to string) {
 	const layout = dayLayoutForBounds + timeOfDayLayoutForBounds
 	if !query.From.IsZero() {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -133,12 +134,25 @@ func ReadRecord(path string) (*Record, error) {
 // A missing directory counts as empty, so a run whose artifacts were already
 // removed is not indexed.
 func DirHasEntries(dir string) (bool, error) {
-	entries, err := os.ReadDir(dir)
+	// Reading one name rather than the whole directory. os.ReadDir would read
+	// and sort every entry to answer this, which costs milliseconds on a run
+	// that wrote thousands of files and nothing on one that wrote three.
+	// #nosec G304 -- the directory comes from a run's recorded artifact path.
+	f, err := os.Open(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
 		}
 		return false, err
 	}
-	return len(entries) > 0, nil
+	defer func() { _ = f.Close() }()
+
+	names, err := f.Readdirnames(1)
+	if err != nil && len(names) == 0 {
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(names) > 0, nil
 }
