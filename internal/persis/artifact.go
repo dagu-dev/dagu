@@ -37,6 +37,7 @@ type ArtifactQuery struct {
 	// is a glob; anything else is a case-insensitive substring.
 	FileName string
 
+	// From and To bound CreatedAt, not StartedAt.
 	From TimeInUTC
 	To   TimeInUTC
 
@@ -54,8 +55,15 @@ type ArtifactPage struct {
 
 // ArtifactFile is a single file produced by a DAG run.
 type ArtifactFile struct {
-	Name      string
-	DAGRunID  string
+	Name     string
+	DAGRunID string
+
+	// CreatedAt is when the run's artifact directory was made, which is the
+	// value the date range filters and the listing orders on.
+	CreatedAt time.Time
+
+	// StartedAt is when the run began, which for a run that waited in a queue
+	// is later than CreatedAt.
 	StartedAt time.Time
 
 	// RootName and RootDAGRunID address the run this one belongs to, naming

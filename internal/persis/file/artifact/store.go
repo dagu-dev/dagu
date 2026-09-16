@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dagucloud/dagu/v2/internal/cmn/artifactpath"
 	"github.com/dagucloud/dagu/v2/internal/cmn/fileutil"
@@ -102,6 +103,7 @@ func (s *Store) collectDay(
 	if err != nil {
 		return false, err
 	}
+	fromBound, toBound := timeBounds(query)
 
 	for _, runDir := range runDirs {
 		if err := ctx.Err(); err != nil {
@@ -123,6 +125,9 @@ func (s *Store) collectDay(
 		if !matchesName(runDir.dagName, query.Name) {
 			continue
 		}
+		if outsideBounds(day+runDir.timeOfDay, fromBound, toBound) {
+			continue
+		}
 
 		rec := s.readRecord(ctx, day, runDir.name)
 		if rec == nil {
@@ -131,11 +136,9 @@ func (s *Store) collectDay(
 		if !query.WorkspaceFilter.MatchesLabels(ir.NewLabels(rec.Labels)) {
 			continue
 		}
-		if !inRange(rec, query) {
-			continue
-		}
 
 		startedAt, _ := stringutil.ParseTime(rec.StartedAt)
+		createdAt := runDirTime(day, runDir.timeOfDay)
 
 		// Paging deep into one run re-walks it from the start, because a cursor
 		// names a path rather than an offset the filesystem can resume from.
@@ -157,6 +160,7 @@ func (s *Store) collectDay(
 			page.Items = append(page.Items, persis.ArtifactFile{
 				Name:         rec.Name,
 				DAGRunID:     rec.DAGRunID,
+				CreatedAt:    createdAt,
 				StartedAt:    startedAt,
 				RootName:     rec.RootName,
 				RootDAGRunID: rec.RootDAGRunID,
@@ -199,8 +203,19 @@ func (s *Store) readRecord(ctx context.Context, day, runDir string) *Record {
 }
 
 type runDirEntry struct {
-	name    string
-	dagName string
+	name      string
+	dagName   string
+	timeOfDay string
+}
+
+// runDirTime rebuilds the moment a run directory was created from the day it
+// sits in and the time of day in its name.
+func runDirTime(day, timeOfDay string) time.Time {
+	at, err := time.ParseInLocation(dayLayoutForBounds+timeOfDayLayoutForBounds, day+timeOfDay, time.UTC)
+	if err != nil {
+		return time.Time{}
+	}
+	return at
 }
 
 // listRunDirsDesc returns a day's index records newest first.
@@ -224,7 +239,7 @@ func (s *Store) listRunDirsDesc(day string) ([]runDirEntry, error) {
 		if !ok {
 			continue
 		}
-		runDirs = append(runDirs, runDirEntry{name: name, dagName: parsed.DAGName})
+		runDirs = append(runDirs, runDirEntry{name: name, dagName: parsed.DAGName, timeOfDay: parsed.TimeOfDay})
 	}
 
 	sort.Slice(runDirs, func(i, j int) bool { return runDirs[i].name > runDirs[j].name })
@@ -234,7 +249,7 @@ func (s *Store) listRunDirsDesc(day string) ([]runDirEntry, error) {
 // listDaysDesc returns the "YYYY/MM/DD" days present in the tree within the
 // query's range, newest first.
 func (s *Store) listDaysDesc(query persis.ArtifactQuery) ([]string, error) {
-	from, to := dayBounds(query)
+	from, to := timeBounds(query)
 
 	years, err := listNumericDirsDesc(s.rootDir, 4)
 	if err != nil {
@@ -286,15 +301,25 @@ func outsideBounds(key, from, to string) bool {
 	return false
 }
 
-func dayBounds(query persis.ArtifactQuery) (from, to string) {
+// timeBounds renders the query range as "YYYY/MM/DDHHMMSS", the same shape a
+// run's day and directory name concatenate to. outsideBounds truncates a bound
+// to its caller's width, so one string serves the year, month, day and second
+// comparisons alike.
+func timeBounds(query persis.ArtifactQuery) (from, to string) {
+	const layout = dayLayoutForBounds + timeOfDayLayoutForBounds
 	if !query.From.IsZero() {
-		from = query.From.UTC().Format("2006/01/02")
+		from = query.From.UTC().Format(layout)
 	}
 	if !query.To.IsZero() {
-		to = query.To.UTC().Format("2006/01/02")
+		to = query.To.UTC().Format(layout)
 	}
 	return from, to
 }
+
+const (
+	dayLayoutForBounds       = "2006/01/02"
+	timeOfDayLayoutForBounds = "150405"
+)
 
 func listNumericDirsDesc(dir string, width int) ([]string, error) {
 	entries, err := os.ReadDir(dir)
@@ -366,24 +391,6 @@ func walkOrderAfter(path, other string) bool {
 		}
 	}
 	return len(left) > len(right)
-}
-
-func inRange(rec *Record, query persis.ArtifactQuery) bool {
-	if query.From.IsZero() && query.To.IsZero() {
-		return true
-	}
-	startedAt, err := stringutil.ParseTime(rec.StartedAt)
-	if err != nil || startedAt.IsZero() {
-		// The day directory already bounded this entry.
-		return true
-	}
-	if !query.From.IsZero() && startedAt.Before(query.From.Time) {
-		return false
-	}
-	if !query.To.IsZero() && startedAt.After(query.To.Time) {
-		return false
-	}
-	return true
 }
 
 func matchesName(dagName, filter string) bool {

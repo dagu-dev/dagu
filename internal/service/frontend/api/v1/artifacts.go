@@ -64,6 +64,7 @@ func (a *API) ListArtifacts(
 			DagRunId:       item.DAGRunID,
 			RootDAGRunName: item.RootName,
 			RootDAGRunId:   item.RootDAGRunID,
+			CreatedAt:      stringutil.FormatTime(item.CreatedAt),
 			Path:           item.Path,
 			Size:           item.Size,
 		}

@@ -89,6 +89,7 @@ func TestListArtifacts(t *testing.T) {
 		assert.Equal(t, "reporter", body.Items[0].Name)
 		assert.Equal(t, "out.txt", body.Items[0].Path)
 		assert.Equal(t, int64(len("hello")), body.Items[0].Size)
+		assert.NotEmpty(t, body.Items[0].CreatedAt, "createdAt is the key the listing is ordered by")
 		require.NotNil(t, body.Items[0].StartedAt)
 		assert.Nil(t, body.NextCursor)
 	})

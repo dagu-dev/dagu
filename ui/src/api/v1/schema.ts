@@ -5173,6 +5173,8 @@ export interface components {
             dagRunId: components["schemas"]["DAGRunId"];
             rootDAGRunName: components["schemas"]["DAGName"];
             rootDAGRunId: components["schemas"]["DAGRunId"];
+            /** @description RFC 3339 timestamp of when the producing DAG-run was created. This is what fromDate and toDate bound and what the listing is ordered by; for a run that waited in a queue it precedes startedAt. */
+            createdAt: string;
             /** @description RFC 3339 timestamp of when the producing DAG-run started */
             startedAt?: string;
             /** @description Path of the file relative to the DAG-run artifact directory */

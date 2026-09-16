@@ -36,6 +36,15 @@ func newStoreFixture(t *testing.T) storeFixture {
 // run leaves them behind.
 func (f storeFixture) index(t *testing.T, dagName, dagRunID string, at time.Time, labels []string, files ...string) string {
 	t.Helper()
+	return f.indexStartedAt(t, dagName, dagRunID, at, at, labels, files...)
+}
+
+// indexStartedAt writes a run whose directory and start time differ, as a run
+// admitted before midnight and started after it does.
+func (f storeFixture) indexStartedAt(
+	t *testing.T, dagName, dagRunID string, at, startedAt time.Time, labels []string, files ...string,
+) string {
+	t.Helper()
 
 	dir, err := artifactpath.NewRunDir(context.Background(), f.root, "", dagName, dagRunID, at)
 	require.NoError(t, err)
@@ -52,7 +61,7 @@ func (f storeFixture) index(t *testing.T, dagName, dagRunID string, at time.Time
 		Name:      dagName,
 		DAGRunID:  dagRunID,
 		Status:    ir.Succeeded,
-		StartedAt: stringutil.FormatTime(at),
+		StartedAt: stringutil.FormatTime(startedAt),
 		Labels:    labels,
 		Dir:       dir,
 	}))
@@ -146,6 +155,41 @@ func TestQueryArtifacts(t *testing.T) {
 		page := f.query(t, persis.ArtifactQuery{From: persis.NewUTC(day2.Add(-time.Hour))})
 
 		assert.Equal(t, []string{"run-new"}, runIDs(page))
+	})
+
+	// Filtering and ordering read the directory's timestamp, so a run admitted
+	// before midnight stays on its admission day even though it started after
+	// it. The point is that one clock decides both: the run is reachable, and
+	// the time it reports is the time it was ordered by.
+	t.Run("PlacesACrossMidnightRunOnItsAdmissionDay", func(t *testing.T) {
+		f := newStoreFixture(t)
+		admitted := time.Date(2026, 9, 14, 23, 59, 0, 0, time.UTC)
+		started := time.Date(2026, 9, 15, 0, 30, 0, 0, time.UTC)
+		f.indexStartedAt(t, "alpha", "run-late", admitted, started, nil, "a.txt")
+
+		onAdmissionDay := f.query(t, persis.ArtifactQuery{
+			From: persis.NewUTC(admitted.Add(-time.Hour)),
+			To:   persis.NewUTC(admitted.Add(time.Minute)),
+		})
+		require.Len(t, onAdmissionDay.Items, 1)
+		assert.Equal(t, admitted, onAdmissionDay.Items[0].CreatedAt.UTC())
+		assert.Equal(t, started, onAdmissionDay.Items[0].StartedAt.UTC())
+
+		onStartDay := f.query(t, persis.ArtifactQuery{From: persis.NewUTC(started)})
+		assert.Empty(t, onStartDay.Items)
+	})
+
+	// Bounds are compared to the second, not rounded to the day.
+	t.Run("BoundsWithinASingleDay", func(t *testing.T) {
+		f := newStoreFixture(t)
+		morning := time.Date(2026, 9, 15, 9, 0, 0, 0, time.UTC)
+		evening := time.Date(2026, 9, 15, 21, 0, 0, 0, time.UTC)
+		f.index(t, "alpha", "run-morning", morning, nil, "a.txt")
+		f.index(t, "alpha", "run-evening", evening, nil, "b.txt")
+
+		page := f.query(t, persis.ArtifactQuery{From: persis.NewUTC(evening.Add(-time.Hour))})
+
+		assert.Equal(t, []string{"run-evening"}, runIDs(page))
 	})
 
 	// A DAG relocated by artifacts.dir is indexed in the global tree and must

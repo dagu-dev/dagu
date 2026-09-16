@@ -13182,6 +13182,12 @@ components:
           $ref: "#/components/schemas/DAGName"
         rootDAGRunId:
           $ref: "#/components/schemas/DAGRunId"
+        createdAt:
+          type: string
+          description: >-
+            RFC 3339 timestamp of when the producing DAG-run was created. This
+            is what fromDate and toDate bound and what the listing is ordered
+            by; for a run that waited in a queue it precedes startedAt.
         startedAt:
           type: string
           description: "RFC 3339 timestamp of when the producing DAG-run started"
@@ -13197,6 +13203,7 @@ components:
         - dagRunId
         - rootDAGRunName
         - rootDAGRunId
+        - createdAt
         - path
         - size
 
